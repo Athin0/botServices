@@ -1,16 +1,17 @@
 package main
 
 import (
+	"botServices/pkg/ports/commands"
 	"fmt"
 	tgbotapi "github.com/skinass/telegram-bot-api/v5"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
-	"tgBotTasks/pkg/commands"
-	"tgBotTasks/pkg/tasks"
-	"tgBotTasks/secret"
 	"time"
+
+	"botServices/db"
+	"botServices/pkg/repository"
+	"botServices/secret"
 )
 
 var (
@@ -25,7 +26,11 @@ func main() {
 	}
 }
 func startTaskBot() error {
-	rand.Seed(time.Now().UnixNano())
+	list, err := db.InitDB()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	bot, err := tgbotapi.NewBotAPI(BotToken)
 	if err != nil {
 		log.Fatalf("NewBotAPI failed: %s", err)
@@ -56,63 +61,68 @@ func startTaskBot() error {
 		}
 	})
 
-	port := os.Getenv("PORT")
+	port := os.Getenv("SERVER_PORT")
 	if port == "" {
-		port = "8081"
+		port = "80"
 	}
 	go func() {
 		log.Fatalln("http err:", http.ListenAndServe(":"+port, nil))
 	}()
 	fmt.Println("start listen :" + port)
 
-	list := tasks.NewArrayOfTasks()
-
+	delChan := make(chan tgbotapi.DeleteMessageConfig)
+	defer close(delChan)
+	go func(delchan chan tgbotapi.DeleteMessageConfig) {
+		for r := range delchan {
+			_, err := bot.Request(r)
+			if err != nil {
+				log.Fatalf(err.Error())
+			}
+		}
+	}(delChan)
 	for update := range updates {
-		handleUpdate(bot, update, list)
+		if update.Message == nil {
+			continue
+		}
+		go handleUpdate(bot, update, list, delChan)
+
 	}
+
 	return nil
 }
 
-func handleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, list tasks.ITaskRepo) {
+func handleUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, list repository.IPasswordRepo, delChan chan tgbotapi.DeleteMessageConfig) {
 	defer func() {
 		if p := recover(); p != nil {
 			log.Printf("panic: %s", p)
 		}
 	}()
 
-	if update.Message == nil {
-		return
-	}
-	log.Printf("text: %#v\n", update.Message.Text)
-	log.Printf("upd: %#v\n", update)
-
-	command, ok, text := commands.SelectCommand(update.Message.Text)
-	if !ok {
-		msg := tgbotapi.NewMessage(
-			update.Message.Chat.ID,
-			`Неизвестная команда`,
-		)
-
-		msg.ReplyMarkup = &tgbotapi.ReplyKeyboardMarkup{
-			Keyboard: [][]tgbotapi.KeyboardButton{
-				{
-					{
-						Text: "/help",
-					},
-				},
-			},
+	command := update.Message.Command()
+	text := update.Message.Text
+	if command == "start" {
+		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Welcome!")
+		msg.ReplyMarkup = keyBoard
+		if _, err := bot.Send(msg); err != nil {
+			log.Panic(err)
 		}
-		_, err := bot.Send(msg)
-		if err != nil {
-			log.Println(err.Error())
-		}
-		return
+		command = "help"
 	}
 	user := update.Message.Chat
 
-	err := commands.Make(list, command, user, bot, text)
-
+	message, err := commands.Make(list, command, user, bot, text)
 	if err != nil {
 		log.Println(err.Error())
 	}
+	if message != nil {
+		<-time.After(10 * time.Second)
+		delChan <- tgbotapi.NewDeleteMessage(user.ID, message.MessageID)
+	}
 }
+
+var keyBoard = tgbotapi.NewReplyKeyboard(
+	tgbotapi.NewKeyboardButtonRow(
+		tgbotapi.NewKeyboardButton("/help"),
+		tgbotapi.NewKeyboardButton("/getAll"),
+	),
+)

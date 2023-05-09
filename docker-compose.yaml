@@ -1,0 +1,39 @@
+version: "3.9"
+
+volumes:
+  postgres:
+
+networks:
+  smnet:
+    driver: bridge
+
+services:
+  postgres:
+    image: postgres:15.2
+    restart: always
+    hostname: postgres
+    volumes:
+      - ./db/service.up.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres:/data/postgres
+    environment:
+      POSTGRES_DB: "postgres"
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "postgres"
+    ports:
+      - "5432:5432"
+    networks:
+      - smnet
+
+  app:
+    build: ./
+    ports:
+      - "80:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_PASSWORD: 'postgres'
+      DB_USER: 'postgres'
+      SERVER_PORT: 8080
+    networks:
+      - smnet

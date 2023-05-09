@@ -1,6 +1,6 @@
 package secret
 
 var (
-	BotToken   = "5175680535:AAGVuP2N1P0qgCMzJplHeu_4y2cseB1axEU"
-	WebhookURL = "https://botathi.herokuapp.com/"
+	BotToken   = "6198151371:AAH_dXukY6FrILE1bNGdMs3-VIB0bvLCQ2U"
+	WebhookURL = "https://549e-176-52-33-72.ngrok-free.app" //"https://botathi.herokuapp.com/"
 )
